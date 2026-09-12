@@ -5,6 +5,9 @@
 # timeline. Measures how often the first example of a shard fails to render a
 # frame before the harness's render timeout.
 #
+# GitHub sets CI=true; the harness parses CI as a shard index, so it is unset
+# here and VISIBLE=1 keeps Chrome headful under xvfb like the real e2e job.
+#
 # device-lost-skip: runs an example that reports a WebGPU Device Lost through
 # renderer.onDeviceLost() together with one normal example, to show the harness
 # reports "TEST PASSED" without ever diffing the device-lost example.
@@ -42,7 +45,7 @@ jobs:
         run: |
           for i in $(seq 1 20); do
             echo "::group::iteration $i"
-            xvfb-run -a npm run test-e2e ${{ matrix.example }} 2>&1 | tee -a probe.log || true
+            xvfb-run -a env -u CI VISIBLE=1 npm run test-e2e ${{ matrix.example }} 2>&1 | tee -a probe.log || true
             echo "::endgroup::"
           done
       - name: Summary
@@ -77,7 +80,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - name: Run device-lost probe alongside a normal example
-        run: xvfb-run -a npm run test-e2e webgpu_zz_devicelost_probe webgl_geometry_cube 2>&1 | tee probe.log
+        run: xvfb-run -a env -u CI VISIBLE=1 npm run test-e2e webgpu_zz_devicelost_probe webgl_geometry_cube 2>&1 | tee probe.log
       - name: Show verdict
         if: always()
         run: |
