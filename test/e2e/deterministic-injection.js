@@ -36,7 +36,8 @@
 
 			console.log( `[e2e-diag] requestAdapter start t=${ _diagT() }` );
 			const adapter = await requestAdapter( ...args );
-			console.log( `[e2e-diag] requestAdapter done t=${ _diagT() } adapter=${ adapter ? 'ok' : 'null' }` );
+			const info = adapter && adapter.info ? `${ adapter.info.vendor }/${ adapter.info.architecture }/${ adapter.info.device }/${ adapter.info.description }` : 'null';
+			console.log( `[e2e-diag] requestAdapter done t=${ _diagT() } adapter=${ info }` );
 
 			if ( adapter ) {
 
