@@ -444,6 +444,7 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 
 	const page = ctx.page;
 	const pageStart = performance.now();
+	const diag = ( label ) => console.log( `[e2e-diag] ${ file }: ${ label } at ${ ( ( performance.now() - pageStart ) / 1000 ).toFixed( 1 ) }s` );
 
 	try {
 
@@ -466,6 +467,8 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 
 		}
 
+		diag( 'goto networkidle0 done' );
+
 		try {
 
 			/* Render page */
@@ -477,10 +480,14 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 				idleTime: idleTime * 1000
 			} );
 
+			diag( 'waitForNetworkIdle done' );
+
 			await page.waitForFunction( () => window._videosReady(), {
 				polling: 100,
 				timeout: renderTimeout * 1000
 			} );
+
+			diag( `videosReady done, parse sleep ${ Math.round( page.pageSize / 1024 / 1024 * parseTime * 1000 ) }ms` );
 
 			await page.evaluate( async ( renderTimeout, parseTime ) => {
 
@@ -489,6 +496,7 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 				/* Resolve render promise */
 
 				window._renderStarted = true;
+				console.log( '[e2e-diag] gate open t=' + performance._now().toFixed( 0 ) + 'ms' );
 
 				await new Promise( function ( resolve, reject ) {
 
@@ -516,17 +524,20 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 
 			}, renderTimeout, page.pageSize / 1024 / 1024 * parseTime * 1000 );
 
+			diag( 'render finished (frame rendered)' );
+
 		} catch ( e ) {
 
 			if ( e !== 'Render timeout exceeded' ) {
 
 				throw new Error( `Error happened while rendering file ${ file }: ${ e }` );
 
-			} /* else { // This can mean that the example doesn't use requestAnimationFrame loop
+			} else {
 
-				console.yellow( `Render timeout exceeded in file ${ file }` );
+				console.yellow( `Render timeout exceeded in file ${ file } (no frame was rendered)` );
+				diag( 'render timeout exceeded' );
 
-			} */ // TODO: fix this
+			}
 
 		}
 

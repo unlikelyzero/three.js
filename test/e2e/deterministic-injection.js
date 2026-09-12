@@ -24,6 +24,41 @@
 	Date.prototype.getTime = now;
 	performance.now = now;
 
+	/* E2E diagnostics (temporary): WebGPU init timing relative to navigation start */
+
+	const _diagT = () => performance._now().toFixed( 0 ) + 'ms';
+
+	if ( typeof navigator !== 'undefined' && navigator.gpu ) {
+
+		const requestAdapter = navigator.gpu.requestAdapter.bind( navigator.gpu );
+
+		navigator.gpu.requestAdapter = async function ( ...args ) {
+
+			console.log( `[e2e-diag] requestAdapter start t=${ _diagT() }` );
+			const adapter = await requestAdapter( ...args );
+			console.log( `[e2e-diag] requestAdapter done t=${ _diagT() } adapter=${ adapter ? 'ok' : 'null' }` );
+
+			if ( adapter ) {
+
+				const requestDevice = adapter.requestDevice.bind( adapter );
+
+				adapter.requestDevice = async function ( ...a ) {
+
+					console.log( `[e2e-diag] requestDevice start t=${ _diagT() }` );
+					const device = await requestDevice( ...a );
+					console.log( `[e2e-diag] requestDevice done t=${ _diagT() }` );
+					return device;
+
+				};
+
+			}
+
+			return adapter;
+
+		};
+
+	}
+
 	// Workers keep their render loops running against the frozen clock.
 	if ( typeof window === 'undefined' ) return;
 
@@ -34,7 +69,14 @@
 
 	window.requestAnimationFrame = function ( cb ) {
 
-		if ( window._renderFinished === true ) return;
+		if ( window._renderFinished === true ) {
+
+			console.log( `[e2e-diag] rAF requested after frame already rendered, dropped t=${ _diagT() }` );
+			return;
+
+		}
+
+		console.log( `[e2e-diag] rAF requested t=${ _diagT() } gateOpen=${ window._renderStarted }` );
 
 		const intervalId = setInterval( function () {
 
@@ -42,6 +84,7 @@
 
 				clearInterval( intervalId );
 				window._renderFinished = true;
+				console.log( `[e2e-diag] rAF fired (the single frame) t=${ _diagT() }` );
 				cb( now() );
 
 			}
