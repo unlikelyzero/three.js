@@ -1,0 +1,90 @@
+# Temporary diagnostic workflow for issue 33559. Not intended to be merged.
+#
+# cold-start: launches a fresh browser 20 times per runner (20 runners), dropping
+# the OS page cache before each launch so every start is genuinely cold, and runs a
+# single WebGPU example on the cold GPU process each time, printing the init
+# timeline. Measures how often the first example of a shard fails to render a
+# frame before the harness's render timeout.
+#
+# GitHub sets CI=true; the harness parses CI as a shard index, so it is unset
+# here and VISIBLE=1 keeps Chrome headful under xvfb like the real e2e job.
+#
+# device-lost-skip: runs an example that reports a WebGPU Device Lost through
+# renderer.onDeviceLost() together with one normal example, to show the harness
+# reports "TEST PASSED" without ever diffing the device-lost example.
+name: E2E cold-start probe
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cold-start:
+    name: Cold-start WebGPU init
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        example: [ webgpu_pmrem_cubemap ]
+        runner: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - name: Install Vulkan drivers and xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - name: 20 fresh-browser runs of ${{ matrix.example }}
+        run: |
+          for i in $(seq 1 20); do
+            echo "::group::iteration $i"
+            sync; sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
+            xvfb-run -a env -u CI VISIBLE=1 npm run test-e2e ${{ matrix.example }} 2>&1 | tee -a probe.log || true
+            echo "::endgroup::"
+          done
+      - name: Summary
+        if: always()
+        run: |
+          echo "TEST PASSED lines:  $(grep -c 'TEST PASSED' probe.log || true)"
+          echo "Diff wrong lines:   $(grep -c 'Diff wrong' probe.log || true)"
+          echo "Render timeouts:    $(grep -c 'Render timeout exceeded' probe.log || true)"
+          echo "Device Lost lines:  $(grep -c 'Device Lost' probe.log || true)"
+          echo "--- init timelines ---"
+          grep -E 'e2e-diag' probe.log | sed 's/\x1b\[[0-9;]*m//g' || true
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        if: always()
+        with:
+          name: coldstart-${{ matrix.example }}-${{ matrix.runner }}
+          path: probe.log
+
+  device-lost-skip:
+    name: Device Lost silent-skip probe
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - name: Install Vulkan drivers and xvfb
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - name: Run device-lost probe alongside a normal example
+        run: xvfb-run -a env -u CI VISIBLE=1 npm run test-e2e webgpu_zz_devicelost_probe webgl_geometry_cube 2>&1 | tee probe.log
+      - name: Show verdict
+        if: always()
+        run: |
+          echo "Exit status of the harness is the step status above."
+          grep -E 'Device Lost|Restarting|Diff|TEST (PASSED|FAILED)|Screenshot does not exist' probe.log | sed 's/\x1b\[[0-9;]*m//g'

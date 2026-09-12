@@ -1,11 +1,14 @@
 ( function () {
 
+	if ( globalThis._e2eInjected === true ) return;
+	globalThis._e2eInjected = true;
+
 	/* Deterministic random */
 
-	window.Math._random = window.Math.random;
+	Math._random = Math.random;
 
 	let seed = Math.PI / 4;
-	window.Math.random = function () {
+	Math.random = function () {
 
 		const x = Math.sin( seed ++ ) * 10000;
 		return x - Math.floor( x );
@@ -14,12 +17,51 @@
 
 	/* Deterministic timer */
 
-	window.performance._now = performance.now;
+	performance._now = performance.now;
 
 	const now = () => 0; // frameId * 16;
-	window.Date.now = now;
-	window.Date.prototype.getTime = now;
-	window.performance.now = now;
+	Date.now = now;
+	Date.prototype.getTime = now;
+	performance.now = now;
+
+	/* E2E diagnostics (temporary): WebGPU init timing relative to navigation start */
+
+	const _diagT = () => performance._now().toFixed( 0 ) + 'ms';
+
+	if ( typeof navigator !== 'undefined' && navigator.gpu ) {
+
+		const requestAdapter = navigator.gpu.requestAdapter.bind( navigator.gpu );
+
+		navigator.gpu.requestAdapter = async function ( ...args ) {
+
+			console.log( `[e2e-diag] requestAdapter start t=${ _diagT() }` );
+			const adapter = await requestAdapter( ...args );
+			const info = adapter && adapter.info ? `${ adapter.info.vendor }/${ adapter.info.architecture }/${ adapter.info.device }/${ adapter.info.description }` : 'null';
+			console.log( `[e2e-diag] requestAdapter done t=${ _diagT() } adapter=${ info }` );
+
+			if ( adapter ) {
+
+				const requestDevice = adapter.requestDevice.bind( adapter );
+
+				adapter.requestDevice = async function ( ...a ) {
+
+					console.log( `[e2e-diag] requestDevice start t=${ _diagT() }` );
+					const device = await requestDevice( ...a );
+					console.log( `[e2e-diag] requestDevice done t=${ _diagT() }` );
+					return device;
+
+				};
+
+			}
+
+			return adapter;
+
+		};
+
+	}
+
+	// Workers keep their render loops running against the frozen clock.
+	if ( typeof window === 'undefined' ) return;
 
 	/* Deterministic RAF */
 
@@ -28,7 +70,14 @@
 
 	window.requestAnimationFrame = function ( cb ) {
 
-		if ( window._renderFinished === true ) return;
+		if ( window._renderFinished === true ) {
+
+			console.log( `[e2e-diag] rAF requested after frame already rendered, dropped t=${ _diagT() }` );
+			return;
+
+		}
+
+		console.log( `[e2e-diag] rAF requested t=${ _diagT() } gateOpen=${ window._renderStarted }` );
 
 		const intervalId = setInterval( function () {
 
@@ -36,6 +85,7 @@
 
 				clearInterval( intervalId );
 				window._renderFinished = true;
+				console.log( `[e2e-diag] rAF fired (the single frame) t=${ _diagT() }` );
 				cb( now() );
 
 			}
@@ -44,24 +94,67 @@
 
 	};
 
-	/* Semi-deterministic video */
+	/* Deterministic video */
 
 	const play = HTMLVideoElement.prototype.play;
+	const videos = new Set();
+	let pendingVideos = 0;
+	let pendingFrames = 0;
+	let videoError = null;
 
-	HTMLVideoElement.prototype.play = async function () {
+	HTMLVideoElement.prototype.play = function () {
 
-		play.call( this );
-		this.addEventListener( 'timeupdate', () => this.pause() );
+		// Reload preloaded frames so video textures receive a frame callback.
+		if ( videos.has( this ) === false ) {
 
-		function renew() {
-
+			const time = this.currentTime;
 			this.load();
-			play.call( this );
-			RAF( renew ); // eslint-disable-line no-undef
+			this.currentTime = time;
+
+			if ( 'requestVideoFrameCallback' in this ) {
+
+				pendingFrames ++;
+				this.requestVideoFrameCallback( () => pendingFrames -- );
+
+			}
 
 		}
 
-		RAF( renew ); // eslint-disable-line no-undef
+		this.playbackRate = 0;
+		videos.add( this );
+
+		const promise = play.call( this );
+		pendingVideos ++;
+
+		promise.then( () => {
+
+			this.pause();
+			pendingVideos --;
+
+		}, error => {
+
+			pendingVideos --;
+			videoError = error;
+
+		} );
+
+		return promise;
+
+	};
+
+	window._videosReady = function () {
+
+		if ( videoError !== null ) throw videoError;
+		if ( pendingVideos !== 0 || pendingFrames !== 0 ) return false;
+
+		for ( const video of videos ) {
+
+			if ( video.error !== null ) throw new Error( video.error.message );
+			if ( video.seeking || video.readyState < video.HAVE_CURRENT_DATA ) return false;
+
+		}
+
+		return true;
 
 	};
 

@@ -3,7 +3,7 @@
  * Copyright 2010-2026 Three.js Authors
  * SPDX-License-Identifier: MIT
  */
-const REVISION = '186dev';
+const REVISION = '187dev';
 
 /**
  * Represents mouse buttons and interaction types in context of controls.
@@ -2580,14 +2580,14 @@ function radToDeg( radians ) {
 }
 
 /**
- * Returns `true` if the given number is a power of two.
+ * Returns `true` if the given integer is a power of two.
  *
  * @param {number} value - The value to check.
- * @return {boolean} Whether the given number is a power of two or not.
+ * @return {boolean} Whether the given integer is a power of two or not.
  */
 function isPowerOfTwo( value ) {
 
-	return ( value & ( value - 1 ) ) === 0 && value !== 0;
+	return value > 0 && Number.isInteger( value ) && 2 ** Math.round( Math.log2( value ) ) === value;
 
 }
 
@@ -6820,24 +6820,6 @@ function createColorManagement() {
 
 		},
 
-		// Deprecated
-
-		fromWorkingColorSpace: function ( color, targetColorSpace ) {
-
-			warnOnce( 'ColorManagement: .fromWorkingColorSpace() has been renamed to .workingToColorSpace().' ); // @deprecated, r177
-
-			return ColorManagement.workingToColorSpace( color, targetColorSpace );
-
-		},
-
-		toWorkingColorSpace: function ( color, sourceColorSpace ) {
-
-			warnOnce( 'ColorManagement: .toWorkingColorSpace() has been renamed to .colorSpaceToWorking().' ); // @deprecated, r177
-
-			return ColorManagement.colorSpaceToWorking( color, sourceColorSpace );
-
-		},
-
 	};
 
 	/******************************************************************************
@@ -7904,6 +7886,10 @@ class Texture extends EventDispatcher {
 	/**
 	 * Frees the GPU-related resources allocated by this instance. Call this
 	 * method whenever this instance is no longer used in your app.
+	 *
+	 * Textures that belong to a render target are managed by the render target.
+	 * Calling this method on such a texture only dispatches the dispose event but
+	 * does not free any GPU resources. Use {@link RenderTarget#dispose} instead.
 	 *
 	 * @fires Texture#dispose
 	 */
@@ -9609,6 +9595,9 @@ class RenderTarget extends EventDispatcher {
 	/**
 	 * Frees the GPU-related resources allocated by this instance. Call this
 	 * method whenever this instance is no longer used in your app.
+	 *
+	 * This also frees the resources of the render target's textures. There is
+	 * no need to dispose them separately.
 	 *
 	 * @fires RenderTarget#dispose
 	 */
@@ -21760,6 +21749,13 @@ class Material extends EventDispatcher {
 		if ( this.shininess !== undefined ) data.shininess = this.shininess;
 		if ( this.clearcoat !== undefined ) data.clearcoat = this.clearcoat;
 		if ( this.clearcoatRoughness !== undefined ) data.clearcoatRoughness = this.clearcoatRoughness;
+		if ( this.diffuseRoughness !== undefined ) data.diffuseRoughness = this.diffuseRoughness;
+
+		if ( this.diffuseRoughnessMap && this.diffuseRoughnessMap.isTexture ) {
+
+			data.diffuseRoughnessMap = this.diffuseRoughnessMap.toJSON( meta ).uuid;
+
+		}
 
 		if ( this.clearcoatMap && this.clearcoatMap.isTexture ) {
 
@@ -21984,6 +21980,7 @@ class Material extends EventDispatcher {
 		if ( json.shininess !== undefined ) this.shininess = json.shininess;
 		if ( json.clearcoat !== undefined ) this.clearcoat = json.clearcoat;
 		if ( json.clearcoatRoughness !== undefined ) this.clearcoatRoughness = json.clearcoatRoughness;
+		if ( json.diffuseRoughness !== undefined ) this.diffuseRoughness = json.diffuseRoughness;
 		if ( json.dispersion !== undefined ) this.dispersion = json.dispersion;
 		if ( json.retroreflectivity !== undefined ) this.retroreflectivity = json.retroreflectivity;
 		if ( json.iridescence !== undefined ) this.iridescence = json.iridescence;
@@ -22141,6 +22138,7 @@ class Material extends EventDispatcher {
 		if ( json.clearcoatRoughnessMap !== undefined ) this.clearcoatRoughnessMap = textures[ json.clearcoatRoughnessMap ] || null;
 		if ( json.clearcoatNormalMap !== undefined ) this.clearcoatNormalMap = textures[ json.clearcoatNormalMap ] || null;
 		if ( json.clearcoatNormalScale !== undefined ) this.clearcoatNormalScale = new Vector2().fromArray( json.clearcoatNormalScale );
+		if ( json.diffuseRoughnessMap !== undefined ) this.diffuseRoughnessMap = textures[ json.diffuseRoughnessMap ] || null;
 
 		if ( json.iridescenceMap !== undefined ) this.iridescenceMap = textures[ json.iridescenceMap ] || null;
 		if ( json.iridescenceThicknessMap !== undefined ) this.iridescenceThicknessMap = textures[ json.iridescenceThicknessMap ] || null;
@@ -39077,6 +39075,8 @@ class MeshStandardMaterial extends Material {
  * - Clearcoat: Some materials — like car paints, carbon fiber, and wet surfaces — require
  * a clear, reflective layer on top of another layer that may be irregular or rough.
  * Clearcoat approximates this effect, without the need for a separate transparent surface.
+ * - Diffuse roughness: Produces the flatter appearance and enhanced backscattering of
+ * rough diffuse surfaces such as clay, concrete, and unpolished materials.
  * - Iridescence: Allows to render the effect where hue varies  depending on the viewing
  * angle and illumination angle. This can be seen on soap bubbles, oil films, or on the
  * wings of many insects.
@@ -39203,6 +39203,18 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
 		 * @default null
 		 */
 		this.clearcoatNormalMap = null;
+
+		/**
+		 * The red channel of this texture is multiplied against `diffuseRoughness`,
+		 * for per-pixel control over the diffuse roughness.
+		 *
+		 * `diffuseRoughnessMap` represents non-color data. Any texture assigned must have
+		 * `texture.colorSpace = NoColorSpace` (default).
+		 *
+		 * @type {?Texture}
+		 * @default null
+		 */
+		this.diffuseRoughnessMap = null;
 
 		/**
 		 * Index-of-refraction for non-metallic materials, from `1.0` to `2.333`.
@@ -39419,6 +39431,7 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
 
 		this._anisotropy = 0;
 		this._clearcoat = 0;
+		this._diffuseRoughness = 0;
 		this._dispersion = 0;
 		this._iridescence = 0;
 		this._retroreflectivity = 0;
@@ -39478,6 +39491,33 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
 		this._clearcoat = value;
 
 	}
+
+	/**
+	 * Roughness of the diffuse layer, from `0.0` to `1.0`. A value of `0.0`
+	 * uses Lambertian diffuse reflection. Values above `0.0` use the EON
+	 * energy-preserving rough diffuse model.
+	 *
+	 * @type {number}
+	 * @default 0
+	 */
+	get diffuseRoughness() {
+
+		return this._diffuseRoughness;
+
+	}
+
+	set diffuseRoughness( value ) {
+
+		if ( this._diffuseRoughness > 0 !== value > 0 ) {
+
+			this.version ++;
+
+		}
+
+		this._diffuseRoughness = value;
+
+	}
+
 	/**
 	 * The intensity of the iridescence layer, simulating RGB color shift based on the angle between
 	 * the surface and the viewer, from `0.0` to `1.0`.
@@ -39631,6 +39671,8 @@ class MeshPhysicalMaterial extends MeshStandardMaterial {
 		this.clearcoatRoughnessMap = source.clearcoatRoughnessMap;
 		this.clearcoatNormalMap = source.clearcoatNormalMap;
 		this.clearcoatNormalScale.copy( source.clearcoatNormalScale );
+		this.diffuseRoughness = source.diffuseRoughness;
+		this.diffuseRoughnessMap = source.diffuseRoughnessMap;
 
 		this.dispersion = source.dispersion;
 		this.ior = source.ior;
@@ -41729,6 +41771,18 @@ function convertArray( array, type ) {
 }
 
 /**
+ * Returns `true` if the given keyframe track settings hold Bezier tangent data.
+ *
+ * @param {?Object} settings - The settings of a keyframe track.
+ * @return {boolean} Whether both tangent arrays are defined or not.
+ */
+function hasTangents( settings ) {
+
+	return settings !== undefined && settings.inTangents !== undefined && settings.outTangents !== undefined;
+
+}
+
+/**
  * Returns an array by which times and values can be sorted.
  *
  * @param {Array<number>} times - The keyframe time values.
@@ -42107,6 +42161,19 @@ class AnimationUtils {
 	static isTypedArray( object ) {
 
 		return isTypedArray( object );
+
+	}
+
+	/**
+	 * Returns `true` if the given keyframe track settings hold Bezier tangent data.
+	 *
+	 * @static
+	 * @param {?Object} settings - The settings of a keyframe track.
+	 * @return {boolean} Whether both tangent arrays are defined or not.
+	 */
+	static hasTangents( settings ) {
+
+		return hasTangents( settings );
 
 	}
 
@@ -42939,6 +43006,15 @@ class KeyframeTrack {
 
 			}
 
+			if ( hasTangents( track.settings ) ) {
+
+				json.settings = {
+					inTangents: convertArray( track.settings.inTangents, Array ),
+					outTangents: convertArray( track.settings.outTangents, Array )
+				};
+
+			}
+
 		}
 
 		json.type = track.ValueTypeName; // mandatory
@@ -43161,6 +43237,13 @@ class KeyframeTrack {
 			for ( let i = 0, n = times.length; i !== n; ++ i ) {
 
 				times[ i ] *= timeScale;
+
+			}
+
+			if ( hasTangents( this.settings ) ) {
+
+				scaleTangentTimes( this.settings.inTangents, timeScale );
+				scaleTangentTimes( this.settings.outTangents, timeScale );
 
 			}
 
@@ -43439,7 +43522,28 @@ class KeyframeTrack {
 		// Interpolant argument to constructor is not saved, so copy the factory method directly.
 		track.createInterpolant = this.createInterpolant;
 
+		if ( hasTangents( this.settings ) ) {
+
+			track.settings = {
+				inTangents: this.settings.inTangents.slice(),
+				outTangents: this.settings.outTangents.slice()
+			};
+
+		}
+
 		return track;
+
+	}
+
+}
+
+function scaleTangentTimes( tangents, timeScale ) {
+
+	// tangents are [ time, value ] pairs, so only every second entry is a time
+
+	for ( let i = 0, n = tangents.length; i !== n; i += 2 ) {
+
+		tangents[ i ] *= timeScale;
 
 	}
 
@@ -44225,17 +44329,30 @@ function parseKeyframeTrack( json ) {
 
 	}
 
+	let track;
+
 	// derived classes can define a static parse method
 	if ( trackType.parse !== undefined ) {
 
-		return trackType.parse( json );
+		track = trackType.parse( json );
 
 	} else {
 
 		// by default, we assume a constructor compatible with the base
-		return new trackType( json.name, json.times, json.values, json.interpolation );
+		track = new trackType( json.name, json.times, json.values, json.interpolation );
 
 	}
+
+	if ( hasTangents( json.settings ) ) {
+
+		track.settings = {
+			inTangents: convertArray( json.settings.inTangents, Float32Array ),
+			outTangents: convertArray( json.settings.outTangents, Float32Array )
+		};
+
+	}
+
+	return track;
 
 }
 
@@ -50396,7 +50513,7 @@ class ImageBitmapLoader extends Loader {
 
 		} ).then( function ( blob ) {
 
-			return createImageBitmap( blob, Object.assign( scope.options, { colorSpaceConversion: 'none' } ) );
+			return createImageBitmap( blob, Object.assign( {}, scope.options, { colorSpaceConversion: 'none' } ) );
 
 		} ).then( function ( imageBitmap ) {
 
