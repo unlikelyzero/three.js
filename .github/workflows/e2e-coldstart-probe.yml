@@ -1,6 +1,7 @@
 # Temporary diagnostic workflow for issue 33559. Not intended to be merged.
 #
-# cold-start: launches a fresh browser 20 times per runner (5 runners) and runs a
+# cold-start: launches a fresh browser 20 times per runner (20 runners), dropping
+# the OS page cache before each launch so every start is genuinely cold, and runs a
 # single WebGPU example on the cold GPU process each time, printing the init
 # timeline. Measures how often the first example of a shard fails to render a
 # frame before the harness's render timeout.
@@ -28,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         example: [ webgpu_pmrem_cubemap ]
-        runner: [ 0, 1, 2, 3, 4 ]
+        runner: [ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19 ]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -45,6 +46,7 @@ jobs:
         run: |
           for i in $(seq 1 20); do
             echo "::group::iteration $i"
+            sync; sudo sh -c 'echo 3 > /proc/sys/vm/drop_caches'
             xvfb-run -a env -u CI VISIBLE=1 npm run test-e2e ${{ matrix.example }} 2>&1 | tee -a probe.log || true
             echo "::endgroup::"
           done

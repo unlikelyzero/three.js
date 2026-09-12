@@ -226,7 +226,8 @@ async function main() {
 		defaultViewport: viewport,
 		handleSIGINT: false,
 		protocolTimeout: 0,
-		userDataDir: './.puppeteer_profile'
+		userDataDir: './.puppeteer_profile',
+		dumpio: true // temporary diagnostic: surface GPU-process/Dawn stderr in CI logs
 	};
 
 	/* Prepare injections */
