@@ -536,7 +536,8 @@
 		"webgpu_xr_rollercoaster",
 		"webgpu_xr_cubes",
 		"webgpu_xr_native_layers",
-		"webgpu_xr_shadows"
+		"webgpu_xr_shadows",
+		"webgpu_zz_devicelost_probe"
 	],
 	"webaudio": [
 		"webaudio_orientation",
@@ -590,7 +591,6 @@
 		"physics_rapier_character_controller",
 		"physics_rapier_vehicle_controller",
 		"physics_rapier_terrain"
-
 	],
 	"misc": [
 		"misc_animation_groups",

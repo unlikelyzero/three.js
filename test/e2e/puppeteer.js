@@ -99,6 +99,24 @@ const height = 250;
 const viewScale = 2;
 const jpgQuality = 95;
 
+/* Issue 33559 reproduction switches — see test/e2e/repro-33559/README.md */
+
+const repro = {
+	icd: process.env.E2E_ICD || 'as-is', // as-is | fixed | unset
+	delayInitMs: parseInt( process.env.E2E_DELAY_INIT_MS || '0' ), // force the cold-start race
+	assetLatencyMs: parseInt( process.env.E2E_ASSET_LATENCY_MS || '0' ), // network latency, cache off (models a cold asset cache)
+	waitInit: process.env.E2E_WAIT_INIT === '1', // candidate fix: re-arm network idle after WebGPU init
+	dumpio: process.env.E2E_DUMPIO === '1' // show Chrome/Dawn stderr
+};
+
+const icdEnv = {
+	'as-is': { VK_DRIVER_FILES: '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json' },
+	'fixed': { VK_DRIVER_FILES: '/usr/share/vulkan/icd.d/lvp_icd.json' },
+	'unset': {}
+}[ repro.icd ];
+
+console.log( `[repro-33559] E2E_ICD=${ repro.icd } E2E_DELAY_INIT_MS=${ repro.delayInitMs } E2E_ASSET_LATENCY_MS=${ repro.assetLatencyMs } E2E_WAIT_INIT=${ repro.waitInit ? 1 : 0 }` );
+
 console.red = msg => console.log( `\x1b[31m${msg}\x1b[39m` );
 console.green = msg => console.log( `\x1b[32m${msg}\x1b[39m` );
 console.yellow = msg => console.log( `\x1b[33m${msg}\x1b[39m` );
@@ -221,12 +239,13 @@ async function main() {
 
 	const launchOptions = {
 		headless: ( 'CI' in process.env || process.env.VISIBLE ) ? false : 'new',
-		env: { ...process.env, VK_DRIVER_FILES: '/usr/share/vulkan/icd.d/lvp_icd.x86_64.json' },
+		env: { ...process.env, ...icdEnv },
 		args: flags,
 		defaultViewport: viewport,
 		handleSIGINT: false,
 		protocolTimeout: 0,
-		userDataDir: './.puppeteer_profile'
+		userDataDir: './.puppeteer_profile',
+		dumpio: repro.dumpio
 	};
 
 	/* Prepare injections */
@@ -325,6 +344,14 @@ async function preparePage( page, injection, builds, errorMessages ) {
 	const client = await page.createCDPSession();
 	await client.send( 'Input.setIgnoreInputEvents', { ignore: true } );
 
+	if ( repro.delayInitMs > 0 ) await page.evaluateOnNewDocument( ( ms ) => { window.__e2eDelayInitMs = ms; }, repro.delayInitMs );
+
+	if ( repro.assetLatencyMs > 0 ) {
+
+		await page.setCacheEnabled( false );
+		await page.emulateNetworkConditions( { download: - 1, upload: - 1, latency: repro.assetLatencyMs } );
+
+	}
 	await page.evaluateOnNewDocument( injection );
 	await page.setRequestInterception( true );
 
@@ -477,6 +504,18 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 				idleTime: idleTime * 1000
 			} );
 
+			if ( repro.waitInit ) {
+
+				// Candidate fix: the network can be idle while WebGPU init is still pending
+				// (examples start their loads only after `await renderer.init()`), so wait for
+				// init to settle and then require network idle again.
+				await page.waitForFunction( () => window.__e2eInit !== 'pending', { polling: 100, timeout: networkTimeout * 60000 } );
+				await page.waitForNetworkIdle( { timeout: networkTimeout * 60000, idleTime: idleTime * 1000 } );
+
+			}
+
+			console.log( `[repro-33559] ${ file }: network idle, opening render gate at ${ ( ( performance.now() - pageStart ) / 1000 ).toFixed( 1 ) }s` );
+
 			await page.waitForFunction( () => window._videosReady(), {
 				polling: 100,
 				timeout: renderTimeout * 1000
@@ -522,11 +561,11 @@ async function checkFile( ctx, failedScreenshots, cleanPage, isMakeScreenshot, f
 
 				throw new Error( `Error happened while rendering file ${ file }: ${ e }` );
 
-			} /* else { // This can mean that the example doesn't use requestAnimationFrame loop
+			} else { // This can mean that the example doesn't use requestAnimationFrame loop
 
-				console.yellow( `Render timeout exceeded in file ${ file }` );
+				console.yellow( `[repro-33559] Render timeout exceeded in file ${ file } (no frame rendered; screenshot taken anyway)` );
 
-			} */ // TODO: fix this
+			}
 
 		}
 

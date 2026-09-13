@@ -27,6 +27,52 @@
 	// Workers keep their render loops running against the frozen clock.
 	if ( typeof window === 'undefined' ) return;
 
+	/* Issue 33559 reproduction hooks — see test/e2e/repro-33559/README.md */
+
+	const _ms = () => performance._now().toFixed( 0 ) + 'ms';
+
+	// 'none' until the page asks for a WebGPU adapter, 'pending' during init, 'done' after requestDevice.
+	window.__e2eInit = 'none';
+
+	if ( navigator.gpu ) {
+
+		const requestAdapter = navigator.gpu.requestAdapter.bind( navigator.gpu );
+
+		navigator.gpu.requestAdapter = async function ( ...args ) {
+
+			window.__e2eInit = 'pending';
+
+			// E2E_DELAY_INIT_MS: artificially slow WebGPU init to force the cold-start race deterministically.
+			if ( window.__e2eDelayInitMs > 0 ) await new Promise( r => setTimeout( r, window.__e2eDelayInitMs ) );
+
+			const adapter = await requestAdapter( ...args );
+			const info = adapter && adapter.info ? `${ adapter.info.vendor }/${ adapter.info.architecture }/${ adapter.info.device }/${ adapter.info.description }` : 'null';
+			console.log( `[repro-33559] requestAdapter done at ${ _ms() } adapter=${ info }` );
+
+			if ( adapter === null ) {
+
+				window.__e2eInit = 'done';
+				return adapter;
+
+			}
+
+			const requestDevice = adapter.requestDevice.bind( adapter );
+
+			adapter.requestDevice = async function ( ...a ) {
+
+				const device = await requestDevice( ...a );
+				window.__e2eInit = 'done';
+				console.log( `[repro-33559] requestDevice done at ${ _ms() }` );
+				return device;
+
+			};
+
+			return adapter;
+
+		};
+
+	}
+
 	/* Deterministic RAF */
 
 	window._renderStarted = false;
@@ -42,6 +88,7 @@
 
 				clearInterval( intervalId );
 				window._renderFinished = true;
+				console.log( `[repro-33559] frame rendered at ${ _ms() } (webgpu init: ${ window.__e2eInit })` );
 				cb( now() );
 
 			}

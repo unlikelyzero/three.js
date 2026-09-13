@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>three.js webgpu - device lost probe (issue 33559 reproduction)</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<link type="text/css" rel="stylesheet" href="main.css">
+	</head>
+	<body>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.webgpu.js",
+					"three/webgpu": "../build/three.webgpu.js",
+					"three/tsl": "../build/three.tsl.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			// Renders a solid red frame, then reports a WebGPU Device Lost through the same
+			// renderer entry point WebGPUBackend uses when GPUDevice.lost resolves.
+			// Its committed "baseline" (examples/screenshots/webgpu_zz_devicelost_probe.jpg)
+			// is deliberately a copy of webgl_geometry_cube.jpg, so if the harness ever
+			// actually diffed this example it would fail. See test/e2e/repro-33559/README.md.
+
+			import * as THREE from 'three';
+
+			const renderer = new THREE.WebGPURenderer();
+			renderer.setPixelRatio( window.devicePixelRatio );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.setClearColor( 0xff0000 );
+			document.body.appendChild( renderer.domElement );
+
+			const scene = new THREE.Scene();
+			const camera = new THREE.PerspectiveCamera();
+
+			await renderer.init();
+
+			renderer.setAnimationLoop( () => {
+
+				renderer.render( scene, camera );
+
+				renderer.onDeviceLost( {
+					api: 'WebGPU',
+					message: 'A valid external Instance reference no longer exists.',
+					reason: 'unknown'
+				} );
+
+			} );
+
+		</script>
+
+	</body>
+</html>
