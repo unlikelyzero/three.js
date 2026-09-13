@@ -95,7 +95,9 @@ cold-sampler)
 	N=${2:-10}; fails=0
 	for i in $(seq 1 "$N"); do
 		rm -rf .puppeteer_profile
-		run "fresh profile, launch $i/$N" "" webgpu_pmrem_cubemap
+		# A shard's first example runs on a cold OS page cache too; drop it where we can (Linux, passwordless sudo).
+		sync; sudo -n sh -c 'echo 3 > /proc/sys/vm/drop_caches' 2>/dev/null || true
+		run "fresh profile + dropped page cache, launch $i/$N" "" webgpu_pmrem_cubemap
 		has 'Diff wrong' && fails=$((fails+1))
 	done
 	echo; echo "RESULT: $DEMO informational — $fails/$N fresh-profile launches rendered a blank frame (natural cold-start rate on this machine)"

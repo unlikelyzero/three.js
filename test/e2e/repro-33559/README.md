@@ -87,8 +87,10 @@ first `requestAnimationFrame` alone would not help — the renderer requests its
 before the example starts loading. Alternatively the affected examples could start their
 loads before `await renderer.init()`.
 
-The `cold-sampler` job measures the natural rate with a fresh Chrome profile per launch;
-it is informational (a few percent on `ubuntu-latest`).
+The `cold-sampler` job measures the natural rate with a fresh Chrome profile and a dropped OS
+page cache per launch; it is informational. In an earlier 20-runner probe the race occurred in
+1 of 20 genuinely cold launches (and 0 of 380 warm ones), matching the ~1-in-20 first-of-shard
+failures seen upstream.
 
 ## 3. CI's WebGPU runs on SwiftShader, and the `VK_DRIVER_FILES` line is load-bearing
 
