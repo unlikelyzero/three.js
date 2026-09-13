@@ -31,7 +31,7 @@ run() { # run "<label>" "<VAR=val VAR2=val>" example...
 	printf '%s\n' "$OUT" | strip | show
 	echo "(exit code $RC)"
 }
-has() { printf '%s\n' "$OUT" | strip | grep -qE "$1"; }
+has() { [ "$(printf '%s\n' "$OUT" | strip | grep -cE "$1")" -gt 0 ]; } # grep -c reads all input; -q would SIGPIPE under pipefail
 verdict() { # verdict <condition-exit-code> <what>
 	if [ "$1" -eq 0 ]; then echo; echo "RESULT: $DEMO REPRODUCED — $2"; exit 0
 	else echo; echo "RESULT: $DEMO NOT REPRODUCED — $2"; exit 1; fi
