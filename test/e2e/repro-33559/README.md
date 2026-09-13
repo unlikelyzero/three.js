@@ -136,5 +136,5 @@ adapter identity per shard) rather than depending on a filename mismatch.
 - `test/e2e/deterministic-injection.js` — logs `adapter.info`, tracks WebGPU init state, honours `E2E_DELAY_INIT_MS`.
 - `test/e2e/puppeteer.js` — env switches `E2E_ICD`, `E2E_DELAY_INIT_MS`, `E2E_ASSET_LATENCY_MS`, `E2E_WAIT_INIT`, `E2E_DUMPIO`; logs when the render gate opens; prints the previously silent "Render timeout exceeded" case.
 - `examples/webgpu_zz_devicelost_probe.html` (+ deliberately wrong baseline, + `files.json` entry).
-- `test/e2e/repro-33559/` — this file, `demo.sh`, `Dockerfile`, `docker.sh`.
+- `test/e2e/repro-33559/` — this file, `INVESTIGATION.md` (the full record: methods, evidence, corrections, open questions), `demo.sh`, `Dockerfile`, `docker.sh`.
 - `.github/workflows/repro-33559.yml`.
