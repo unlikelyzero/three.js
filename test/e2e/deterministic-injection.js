@@ -1,11 +1,14 @@
 ( function () {
 
+	if ( globalThis._e2eInjected === true ) return;
+	globalThis._e2eInjected = true;
+
 	/* Deterministic random */
 
-	window.Math._random = window.Math.random;
+	Math._random = Math.random;
 
 	let seed = Math.PI / 4;
-	window.Math.random = function () {
+	Math.random = function () {
 
 		const x = Math.sin( seed ++ ) * 10000;
 		return x - Math.floor( x );
@@ -14,12 +17,61 @@
 
 	/* Deterministic timer */
 
-	window.performance._now = performance.now;
+	performance._now = performance.now;
 
 	const now = () => 0; // frameId * 16;
-	window.Date.now = now;
-	window.Date.prototype.getTime = now;
-	window.performance.now = now;
+	Date.now = now;
+	Date.prototype.getTime = now;
+	performance.now = now;
+
+	// Workers keep their render loops running against the frozen clock.
+	if ( typeof window === 'undefined' ) return;
+
+	/* Issue 33559 reproduction hooks — see test/e2e/repro-33559/README.md */
+
+	const _ms = () => performance._now().toFixed( 0 ) + 'ms';
+
+	// 'none' until the page asks for a WebGPU adapter, 'pending' during init, 'done' after requestDevice.
+	window.__e2eInit = 'none';
+
+	if ( navigator.gpu ) {
+
+		const requestAdapter = navigator.gpu.requestAdapter.bind( navigator.gpu );
+
+		navigator.gpu.requestAdapter = async function ( ...args ) {
+
+			window.__e2eInit = 'pending';
+
+			// E2E_DELAY_INIT_MS: artificially slow WebGPU init to force the cold-start race deterministically.
+			if ( window.__e2eDelayInitMs > 0 ) await new Promise( r => setTimeout( r, window.__e2eDelayInitMs ) );
+
+			const adapter = await requestAdapter( ...args );
+			const info = adapter && adapter.info ? `${ adapter.info.vendor }/${ adapter.info.architecture }/${ adapter.info.device }/${ adapter.info.description }` : 'null';
+			console.log( `[repro-33559] requestAdapter done at ${ _ms() } adapter=${ info }` );
+
+			if ( adapter === null ) {
+
+				window.__e2eInit = 'done';
+				return adapter;
+
+			}
+
+			const requestDevice = adapter.requestDevice.bind( adapter );
+
+			adapter.requestDevice = async function ( ...a ) {
+
+				const device = await requestDevice( ...a );
+				window.__e2eInit = 'done';
+				console.log( `[repro-33559] requestDevice done at ${ _ms() }` );
+				return device;
+
+			};
+
+			return adapter;
+
+		};
+
+	}
 
 	/* Deterministic RAF */
 
@@ -36,6 +88,7 @@
 
 				clearInterval( intervalId );
 				window._renderFinished = true;
+				console.log( `[repro-33559] frame rendered at ${ _ms() } (webgpu init: ${ window.__e2eInit })` );
 				cb( now() );
 
 			}
@@ -44,24 +97,67 @@
 
 	};
 
-	/* Semi-deterministic video */
+	/* Deterministic video */
 
 	const play = HTMLVideoElement.prototype.play;
+	const videos = new Set();
+	let pendingVideos = 0;
+	let pendingFrames = 0;
+	let videoError = null;
 
-	HTMLVideoElement.prototype.play = async function () {
+	HTMLVideoElement.prototype.play = function () {
 
-		play.call( this );
-		this.addEventListener( 'timeupdate', () => this.pause() );
+		// Reload preloaded frames so video textures receive a frame callback.
+		if ( videos.has( this ) === false ) {
 
-		function renew() {
-
+			const time = this.currentTime;
 			this.load();
-			play.call( this );
-			RAF( renew ); // eslint-disable-line no-undef
+			this.currentTime = time;
+
+			if ( 'requestVideoFrameCallback' in this ) {
+
+				pendingFrames ++;
+				this.requestVideoFrameCallback( () => pendingFrames -- );
+
+			}
 
 		}
 
-		RAF( renew ); // eslint-disable-line no-undef
+		this.playbackRate = 0;
+		videos.add( this );
+
+		const promise = play.call( this );
+		pendingVideos ++;
+
+		promise.then( () => {
+
+			this.pause();
+			pendingVideos --;
+
+		}, error => {
+
+			pendingVideos --;
+			videoError = error;
+
+		} );
+
+		return promise;
+
+	};
+
+	window._videosReady = function () {
+
+		if ( videoError !== null ) throw videoError;
+		if ( pendingVideos !== 0 || pendingFrames !== 0 ) return false;
+
+		for ( const video of videos ) {
+
+			if ( video.error !== null ) throw new Error( video.error.message );
+			if ( video.seeking || video.readyState < video.HAVE_CURRENT_DATA ) return false;
+
+		}
+
+		return true;
 
 	};
 

@@ -1,0 +1,82 @@
+# Reproductions for issue 33559. Every job asserts the *buggy* behaviour, so a green job
+# means "reproduced in GitHub Actions". See test/e2e/repro-33559/README.md.
+name: Repro 33559
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  device-lost-skip:
+    name: Device Lost is skipped and reported PASS
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - run: bash test/e2e/repro-33559/demo.sh device-lost
+
+  forced-race:
+    name: Cold WebGPU init outruns the network-idle gate (and the candidate fix)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - run: bash test/e2e/repro-33559/demo.sh forced-race
+
+  icd:
+    name: VK_DRIVER_FILES ${{ matrix.mode }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [ as-is, fixed, unset ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - name: Which adapter does the harness get, and does its ICD path exist?
+        if: matrix.mode == 'as-is'
+        run: bash test/e2e/repro-33559/demo.sh adapter
+      - run: bash test/e2e/repro-33559/demo.sh icd ${{ matrix.mode }}
+
+  cold-sampler:
+    name: Natural cold-start rate (informational)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ 0, 1, 2, 3, 4 ]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: 24
+          cache: 'npm'
+      - run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers xvfb
+      - run: npm ci
+      - run: npm run build
+      - run: bash test/e2e/repro-33559/demo.sh cold-sampler 10
